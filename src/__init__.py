@@ -57,14 +57,17 @@ class TDLinear(object):
         # note that the gradient of the value function wrt the params are the current features
 
         delta = reward + (self.gamma * self.value(features)) - self.value(pfeatures)
+
         self.e = self.gamma * self.ld * self.e + pfeatures
         self.params = self.params + self.alpha * delta * self.e
 
     def reset(self):
         self.e = np.zeros(self.nstates)
 
-
 class TD(object):
+    """
+    Discrete value function approximation via temporal difference learning.
+    """
 
     def __init__(self, nstates, alpha, gamma, ld):
         self.V = np.zeros(nstates)
@@ -74,31 +77,40 @@ class TD(object):
         self.gamma = gamma # discount
         self.ld = ld # lambda
 
-    def train(self, pstate, reward, state):
-        # basically does one step of training
+    def value(self, state):
+        return self.V[state]
 
-        delta = reward + (self.gamma * self.V[state]) - self.V[pstate]
-        self.e[pstate] += 1
+    def delta(self, pstate, reward, state):
+        """
+        This is the core error calculation. Note that if the value
+        function is perfectly accurate then this returns zero since by
+        definition value(pstate) = gamma * value(state) + reward.
+        """
+        return reward + (self.gamma * self.value(state)) - self.value(pstate)
+
+    def train(self, pstate, reward, state):
+        """
+        A single step of reinforcement learning.
+        """
+
+        delta = self.delta(pstate, reward, state)
+
+        self.e[pstate] = 1 # replacing traces
 
         for s in range(self.nstates):
             self.V[s] += self.alpha * delta * self.e[s]
             self.e[s] *= (self.gamma * self.ld)
 
-    def sim(self, niters, env):
-        # added for direct comparison with other implementations
-
-        for i in range(niters):
-            env.reset()
-            next = env.current
-            self.reset() # replacing traces?
-
-            while not env.terminal(next):
-                previous, action, reward, next = env.move(env.random_policy())
-
+    def learn(self, nepisodes, env, policy):
+        # learn for niters episodes with resets
+        for i in range(nepisodes):
+            self.reset()
+            t = env.single_episode(policy) # includes env reset
+            for (previous, action, reward, next) in t:
                 self.train(previous, reward, next)
-
-            print self.V
 
     def reset(self):
         self.e = np.zeros(self.nstates)
 
+class Sarsa(TD):
+    pass
