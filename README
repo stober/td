@@ -1,0 +1,10 @@
+Temporal Difference Learning in Python
+
+Author: Jeremy Stober
+Contact: stober@gmail.com
+Version: 0.01
+
+This is a Python implementation of some common temporal difference
+learning algorthms. The implementations use discrete, linear, or CMAC
+value function representations and include eligability traces
+(ie. TD(\lambda)).
