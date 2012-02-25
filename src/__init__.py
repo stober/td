@@ -12,29 +12,6 @@ import numpy as np
 import pickle
 from cmac import TraceCMAC
 
-class TDCmac(object):
-    def __init__(self, nactions, beta, gamma, ld):
-        self.cmac = []
-        for a in range(nactions):
-            self.cmac.append(TraceCMAC(32,0.1,beta, ld, gamma))
-
-    def value(self, action, vector):
-        return self.cmac[action].eval(vector)
-
-    def train(self, action, pvector, reward, vector, next_action):
-        # This has an error. Needs to include the next action.
-        self.cmac[action].train(vector, pvector, reward)
-
-    def reset(self):
-        for cmac in self.cmac:
-            cmac.reset()
-
-    def policy(self,vector):
-        values = []
-        for cmac in self.cmac:
-            values.append(cmac.eval(vector))
-        return np.argmax(values)
-
 class TD(object):
     """
     Discrete value function approximation via temporal difference learning.
@@ -160,3 +137,29 @@ class TDLinear(TD):
 
     def reset(self):
         self.e = np.zeros(self.nstates)
+
+class TDQCmac(TDQ):
+    """
+    Uses CMACs to approximate the action value function.
+    """
+    def __init__(self, nactions, alpha, gamma, ld):
+        self.cmac = []
+        for a in range(nactions):
+            self.cmac.append(TraceCMAC(32, 0.1, alpha, ld, gamma))
+
+    def value(self, action, vector):
+        return self.cmac[action].eval(vector)
+
+    def train(self, pvector, paction, reward, vector, action):
+        delta = self.delta(pvector, paction, reward, vector, action)        
+        self.cmac[paction].train(pvector, delta)
+
+    def reset(self):
+        for cmac in self.cmac:
+            cmac.reset()
+
+    def policy(self,vector):
+        values = []
+        for cmac in self.cmac:
+            values.append(cmac.eval(vector))
+        return np.argmax(values)
