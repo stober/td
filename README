@@ -9,4 +9,4 @@ learning algorthms. The implementations use discrete, linear, or CMAC
 value function representations and include eligability traces
 (ie. TD(\lambda)).
 
-Requires: numpy, cmac (http://github.com/stober/cmac)
+Requires: numpy, cmac (http://github.com/stober/cmac), cartpole (https://github.com/stober/cartpole)

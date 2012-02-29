@@ -143,6 +143,10 @@ class TDQCmac(TDQ):
     Uses CMACs to approximate the action value function.
     """
     def __init__(self, nactions, alpha, gamma, ld):
+        self.nactions = nactions
+        self.alpha = alpha
+        self.gamma = gamma
+        self.ld = ld
         self.cmac = []
         for a in range(nactions):
             self.cmac.append(TraceCMAC(32, 0.1, alpha, ld, gamma))
@@ -151,7 +155,7 @@ class TDQCmac(TDQ):
         return self.cmac[action].eval(vector)
 
     def train(self, pvector, paction, reward, vector, action):
-        delta = self.delta(pvector, paction, reward, vector, action)        
+        delta = self.delta(pvector, paction, reward, vector, action)
         self.cmac[paction].train(pvector, delta)
 
     def reset(self):

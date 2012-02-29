@@ -9,7 +9,8 @@ Description: Examples using TD algorithms to learn value functions.
 
 from gridworld.boyan import Boyan
 from gridworld.chainwalk import Chainwalk
-from td import TD, TDQ
+from cartpole import CartPole
+from td import TD, TDQ, TDQCmac
 
 # a simple environment
 env = Boyan()
@@ -20,8 +21,15 @@ print learner.V
 env = Chainwalk()
 learnerq = TDQ(2,4, 0.1, 0.9, 0.8)
 
+#import pdb
+#pdb.set_trace()
+#learnerq.learn(1000,env,env.random_policy,episodic = False)
+#print learnerq.V
+
+env = CartPole()
+learnerq = TDQCmac(2,0.1,0.9,0.8)
 import pdb
 pdb.set_trace()
-learnerq.learn(1000,env,env.random_policy,episodic = False)
-print learnerq.V
+learnerq.learn(1000,env,env.random_policy,episodic = True)
+
 
