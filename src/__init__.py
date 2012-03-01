@@ -201,7 +201,7 @@ def flip(p):
 def rargmax(vector):
     """ Argmax that chooses randomly among eligable maximum indices. """
     m = np.amax(vector)
-    indices = np.argwhere(vector == m)
+    indices = np.nonzero(vector == m)[0]
     if len(indices) == 0:
         pdb.set_trace()
         return 0
