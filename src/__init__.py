@@ -13,6 +13,9 @@ import numpy.random as npr
 import pickle
 from cmac import TraceCMAC
 
+nlevels = 8
+resolution = 0.01
+
 class TD(object):
     """
     Discrete value function approximation via temporal difference learning.
@@ -142,6 +145,24 @@ class TDLinear(TD):
     def reset(self):
         self.e = np.zeros(self.nstates)
 
+class TDCmac(TD):
+    def __init__(self, alpha, gamma, ld):
+        self.nlevels = nlevels
+        self.resolution = resolution
+        self.cmac = TraceCMAC(self.nlevels, self.resolution, alpha, ld * gamma, replace = False, inc = 1.0)
+        self.gamma = gamma
+
+    def value(self, vector):
+        return self.cmac.eval(vector)
+
+    def train(self, pvector, reward, vector):
+        delta = self.delta(pvector, reward, vector)
+        self.cmac.train(pvector, delta)
+        return delta
+
+    def reset(self):
+        self.cmac.reset()
+
 class TDQCmac(TDQ):
     """
     Uses CMACs to approximate the action value function.
@@ -152,15 +173,19 @@ class TDQCmac(TDQ):
         self.gamma = gamma
         self.ld = ld
         self.cmac = []
+        self.nlevels = nlevels
+        self.resolution = resolution
         for a in range(nactions):
-            self.cmac.append(TraceCMAC(32, 0.1, alpha, ld * gamma, replace=True,inc=1.0))
+            self.cmac.append(TraceCMAC(self.nlevels, self.resolution, alpha, ld * gamma, replace=False, inc=1.0))
 
     def value(self, action, vector):
         return self.cmac[action].eval(vector)
 
-    def train(self, pvector, paction, reward, vector, action):
-        delta = self.delta(pvector, paction, reward, vector, action)
+    def train(self, pvector, paction, reward, vector, action, delta = None):
+        if delta is None:
+            delta = self.delta(pvector, paction, reward, vector, action)
         self.cmac[paction].train(pvector, delta)
+        return delta
 
     def reset(self):
         for cmac in self.cmac:
@@ -363,5 +388,36 @@ class SarsaCmac(TDQCmac):
                 break
         print "Balanced for %d timesteps." % count
 
-class ActorCriticCmac(object):
-    pass
+class ActorCriticCmac(ActorCritic):
+
+    def __init__(self, nactions, alpha, beta, gamma, ld_alpha, ld_beta):
+        self.critic = TDCmac(alpha, gamma, ld_alpha)
+        self.actor = TDQCmac(nactions, beta, gamma, ld_beta)
+        self.epsilon = 0.01
+        self.nactions = nactions
+
+
+    def learn(self, nepisodes, env):
+        """
+        Right now this is specifically for learning the cartpole task.
+        """
+
+        # learn for niters episodes with resets
+        count = 0
+        for i in range(nepisodes):
+            self.reset()
+            env.reset()
+            next_action = self.softmax_policy([env.x,env.xdot,env.theta,env.thetadot])
+            print "Episode %d, Prev count %d" % (i, count)
+            count = 0
+            while not env.failure():
+                pstate, paction, reward, state = env.move(next_action,boxed = False)
+                next_action = self.softmax_policy([env.x,env.xdot,env.theta,env.thetadot])
+                self.train(pstate, paction, reward, state, next_action)
+                count += 1
+                if count % 1000 == 0:
+                    print "Count: %d" % count
+                if count > 10000:
+                    break
+
+
