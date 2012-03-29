@@ -13,9 +13,6 @@ import numpy.random as npr
 import pickle
 from cmac import TraceCMAC
 
-nlevels = 8
-resolution = 0.01
-
 class TD(object):
     """
     Discrete value function approximation via temporal difference learning.
@@ -47,7 +44,7 @@ class TD(object):
 
         delta = self.delta(pstate, reward, state)
 
-        self.e[pstate] += 1.0 
+        self.e[pstate] += 1.0
 
         #for s in range(self.nstates):
         self.V += self.alpha * delta * self.e
@@ -146,7 +143,7 @@ class TDLinear(TD):
         self.e = np.zeros(self.nstates)
 
 class TDCmac(TD):
-    def __init__(self, alpha, gamma, ld):
+    def __init__(self, alpha, gamma, ld, nlevels = 10, resolution = 0.1):
         self.nlevels = nlevels
         self.resolution = resolution
         self.cmac = TraceCMAC(self.nlevels, self.resolution, alpha, ld * gamma, replace = False, inc = 1.0)
@@ -167,7 +164,7 @@ class TDQCmac(TDQ):
     """
     Uses CMACs to approximate the action value function.
     """
-    def __init__(self, nactions, alpha, gamma, ld):
+    def __init__(self, nactions, alpha, gamma, ld, nlevels = 10, resolution = 0.1):
         self.nactions = nactions
         self.alpha = alpha
         self.gamma = gamma
@@ -245,7 +242,7 @@ class ActorCritic(object):
     def reset(self):
         self.actor.reset()
         self.critic.reset()
-        
+
     def learn(self, nepisodes, env):
         """
         Right now this is specifically for learning the cartpole task.
@@ -269,7 +266,7 @@ class ActorCritic(object):
                 if count > 10000:
                     break
 
-    
+
 
 class Sarsa(TDQ):
     """
