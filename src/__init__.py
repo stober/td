@@ -12,14 +12,15 @@ import numpy as np
 import numpy.random as npr
 import pickle
 from cmac import TraceCMAC
+from utils import incavg
 
 class TD(object):
     """
     Discrete value function approximation via temporal difference learning.
     """
 
-    def __init__(self, nstates, alpha, gamma, ld):
-        self.V = np.zeros(nstates)
+    def __init__(self, nstates, alpha, gamma, ld, init_val = 0.0):
+        self.V = np.ones(nstates) * init_val
         self.e = np.zeros(nstates)
         self.nstates = nstates
         self.alpha = alpha # learning rate
@@ -52,13 +53,15 @@ class TD(object):
 
         return delta
 
-    def learn(self, nepisodes, env, policy):
+    def learn(self, nepisodes, env, policy, verbose = True):
         # learn for niters episodes with resets
         for i in range(nepisodes):
             self.reset()
             t = env.single_episode(policy) # includes env reset
             for (previous, action, reward, state, next_action) in t:
                 self.train(previous, reward, state)
+            if verbose:
+                print i
 
     def reset(self):
         self.e = np.zeros(self.nstates)
@@ -67,8 +70,8 @@ class TDQ(object):
     """
     Discrete action-value function approximation via temporal difference learning.
     """
-    def __init__(self, nactions, nstates, alpha, gamma, ld):
-        self.V = np.zeros((nactions, nstates))
+    def __init__(self, nactions, nstates, alpha, gamma, ld, init_val = 0.0):
+        self.V = np.ones((nactions, nstates)) * init_val
         self.e = np.zeros((nactions, nstates))
         self.nactions = nactions
         self.nstates = nstates
@@ -100,7 +103,7 @@ class TDQ(object):
         self.V += self.alpha * delta * self.e
         self.e *= (self.gamma * self.ld)
 
-    def learn(self, nepisodes, env, policy, episodic = True):
+    def learn(self, nepisodes, env, policy, episodic = True, verbose = True):
         # learn for nepisodes with resets
         if episodic:
             for i in range(nepisodes):
@@ -108,6 +111,9 @@ class TDQ(object):
                 t = env.single_episode(policy) # includes env reset
                 for (previous, paction, reward, state, action) in t:
                     self.train(previous, paction, reward, state, action)
+                if verbose:
+                    print i
+
         else:
             for i in range(nepisodes):
                 t = env.trace(nepisodes, policy)
@@ -146,8 +152,11 @@ class TDCmac(TD):
     def __init__(self, alpha, gamma, ld, nlevels = 10, resolution = 0.1):
         self.nlevels = nlevels
         self.resolution = resolution
-        self.cmac = TraceCMAC(self.nlevels, self.resolution, alpha, ld * gamma, replace = False, inc = 1.0)
+        self.cmac = TraceCMAC(self.nlevels, self.resolution, alpha, ld * gamma, replace = True, inc = 1.0)
         self.gamma = gamma
+
+    def __len__(self):
+        return len(self.cmac)
 
     def value(self, vector):
         return self.cmac.eval(vector)
@@ -173,7 +182,13 @@ class TDQCmac(TDQ):
         self.nlevels = nlevels
         self.resolution = resolution
         for a in range(nactions):
-            self.cmac.append(TraceCMAC(self.nlevels, self.resolution, alpha, ld * gamma, replace=False, inc=1.0))
+            self.cmac.append(TraceCMAC(self.nlevels, self.resolution, alpha, ld * gamma, replace=True, inc=1.0))
+
+    def __len__(self):
+        s = 0
+        for c in self.cmac:
+            s += len(c)
+        return s
 
     def value(self, action, vector):
         return self.cmac[action].eval(vector)
@@ -213,18 +228,28 @@ class ActorCritic(object):
     """
     Actor-critic RL with softmax selection.
     """
-    def __init__(self, nactions, nstates, alpha, beta, gamma, ld_alpha, ld_beta):
-        self.critic = TD(nstates, alpha, gamma, ld_alpha)
-        self.actor = TDQ(nactions, nstates, beta, gamma, ld_beta)
+    def __init__(self, nactions, nstates, alpha, beta, gamma, ld_alpha, ld_beta, actor_init = 0.0, critic_init = 0.0):
+        self.critic = TD(nstates, alpha, gamma, ld_alpha, critic_init)
+        self.actor = TDQ(nactions, nstates, beta, gamma, ld_beta, actor_init)
         self.epsilon = 0.01
         self.nactions = nactions
         self.nstates = nstates
 
-    def softmax_policy(self, vector):
+    def softmax_policy(self, vector, t = 1.0):
         vals = np.array([self.actor.value(a,vector) for a in range(self.nactions)])
         dist = softmax(vals, t = 1.0)
         res = npr.multinomial(1,dist)
         return np.argmax(res)
+
+    def __len__(self):
+        return 0
+
+    def value(self, vector):
+        return self.critic.value(vector)
+
+    def avalue(self, action, vector):
+        return self.actor.value(action, vector)
+
 
     def epsilon_policy(self, vector):
         if flip(self.epsilon):
@@ -266,7 +291,108 @@ class ActorCritic(object):
                 if count > 10000:
                     break
 
+class SampleModelValueIteration(object):
+    def __init__(self, nactions, nstates):
+        
+        self.reward_model = {}
+        self.nstates = nstates
+        self.nactions = nactions
+        self.transition_model = np.zeros((nstates, nactions, nstates))
+        self.values = np.zeros(nstates)
+        self.optimal = np.zeros(nstates) # store best policy here
+        self.learned = False # set to true when finished learning.
+        self.gamma = 0.9
 
+    def random(self, state):
+        return pr.choice(range(self.nactions))
+
+    def best(self, state):
+        return self.optimal[state]
+
+    def train(self, pstate, paction, reward, state, next_action):
+
+        # track average reward
+        if self.reward_model.has_key((pstate,paction,state)):
+            self.reward_model[pstate,paction,state].send(reward)
+        else:
+            self.reward_model[pstate,paction,state] = incavg(reward)
+
+        # track transition counts (normalize later to get multinomial
+        # distributions conditioned on pstate and paction).
+        self.transition_model[pstate,paction,state] += 1
+
+
+    def learn(self, nepisodes, env, verbose = True):
+        # First collect samples to populate a model of the environment.
+        count = 0
+        for i in range(nepisodes):
+            env.reset()
+            next_action = self.random(env.state())
+            if verbose: print "Episode %d, Prev count %d" % (i, count)
+            count = 0
+            while not env.failure():
+                pstate, paction, reward, state = env.move(next_action)
+                next_action = self.random(env.state())
+                self.train(pstate, paction, reward, state, next_action)
+                count += 1
+                if count % 1000 == 0:
+                    print "Count: %d" % count
+                if count > 10000:
+                    break
+
+        # some additional processing prior to value iteration
+        self.normalized_reward = {}
+        for k,v in self.reward_model.items():
+            self.normalized_reward[k] = v.next()
+
+        self.normalized_transitions = np.zeros((self.nstates, self.nactions, self.nstates))
+        for i in range(self.nstates):
+            for a in range(self.nactions):
+                if np.sum(self.transition_model[i,a,:]) == 0:
+                    pass
+                else:
+                    self.normalized_transitions[i,a,:] = self.transition_model[i,a,:] / float(np.sum(self.transition_model[i,a,:]))
+
+        # double check that we have a learned distribution
+
+        print "Value Iteration"
+        values = np.zeros(self.nstates)
+        rtol = 1e-4
+
+        condition = True
+        i = 0
+        while condition:
+            delta = 0
+            for s in range(self.nstates):
+                v = values[s]
+                sums = np.zeros(self.nactions)
+                for a in range(self.nactions):
+                    for t in range(self.nstates):
+                        sums[a] += self.normalized_transitions[s,a,t] * (self.normalized_reward.get((s,a,t),0.0) + self.gamma * values[t])
+                
+                values[s] = np.max(sums)
+                delta = max(delta, abs(v - values[s]))
+            print i,delta
+            i += 1
+            if delta < rtol:
+                break
+
+        # compute the optimal policy
+        policy = np.zeros(self.nstates, dtype=int) # record the best action for each state
+        for s in range(self.nstates):
+            sums = np.zeros(self.nactions)
+            for a in range(self.nactions):
+                for t in range(self.nstates):
+                    sums[a] += self.normalized_transitions[s,a,t] * (self.normalized_reward.get((s,a,t),0.0) + self.gamma * values[t])
+            policy[s] = np.argmax(sums)
+
+
+        return values,policy
+        
+        # return self.normalized_reward, self.normalized_transitions
+        # Next do value iteration using the learned.
+
+    
 
 class Sarsa(TDQ):
     """
@@ -292,7 +418,7 @@ class Sarsa(TDQ):
     def best(self, vector):
         return rargmax([self.value(a,vector) for a in range(self.nactions)])
 
-    def learn(self, nepisodes, env):
+    def learn(self, nepisodes, env, verbose = True):
         """
         Right now this is specifically for learning the cartpole task.
         """
@@ -303,10 +429,11 @@ class Sarsa(TDQ):
             self.reset()
             env.reset()
             next_action = self.epsilon_policy(env.state())
-            print "Episode %d, Prev count %d" % (i, count)
+            if verbose: print "Episode %d, Prev count %d" % (i, count)
             count = 0
             while not env.failure():
-                pstate, paction, reward, state = env.move(next_action,boxed = True)
+                #,boxed = True
+                pstate, paction, reward, state = env.move(next_action)
                 next_action = self.epsilon_policy(env.state())
                 self.train(pstate, paction, reward, state, next_action)
                 count += 1
@@ -387,12 +514,14 @@ class SarsaCmac(TDQCmac):
 
 class ActorCriticCmac(ActorCritic):
 
-    def __init__(self, nactions, alpha, beta, gamma, ld_alpha, ld_beta):
-        self.critic = TDCmac(alpha, gamma, ld_alpha)
-        self.actor = TDQCmac(nactions, beta, gamma, ld_beta)
+    def __init__(self, nactions, alpha, beta, gamma, ld_alpha, ld_beta, tdlvls = 10, tdres = 0.1, tdqlvls = 10, tdqres=0.1):
+        self.critic = TDCmac(alpha, gamma, ld_alpha, tdlvls, tdres)
+        self.actor = TDQCmac(nactions, beta, gamma, ld_beta, tdqlvls, tdqres)
         self.epsilon = 0.01
         self.nactions = nactions
 
+    def __len__(self):
+        return len(self.critic) + len(self.actor)
 
     def learn(self, nepisodes, env):
         """
